@@ -1,3 +1,5 @@
+mod qrcode;
+
 use dotenv::dotenv;
 use serenity::{
     async_trait,
@@ -16,14 +18,14 @@ use serenity::{
             group
         }
     },
-    // http::AttachmentType,
+    http::AttachmentType,
 };
 
 use std::env;
-// use std::path::Path;
+use std::path::Path;
 
 #[group]
-#[commands(ping, hello)]
+#[commands(ping, hello, qr)]
 struct General;
 
 #[command]
@@ -54,6 +56,23 @@ async fn hello(ctx: &Context, msg: &Message) -> CommandResult {
         });
 
         //m.add_file(AttachmentType::Path(Path::new("./ferris_eyes.png")));
+        m
+    }).await?;
+    Ok(())
+}
+
+#[command]
+async fn qr(ctx: &Context, msg: &Message) -> CommandResult {
+    const QR_PATH: &str = "/tmp/alain/lastqr.png";
+    let img = qrcode::qr(&msg.content[4..]).unwrap();
+    img.save(QR_PATH).unwrap();
+
+    let _msg = msg.channel_id.send_message(&ctx.http, |m| {
+        m.embed(|e| {
+            e.image("attachment://lastqr.png");
+            e
+        });
+        m.add_file(AttachmentType::Path(Path::new(QR_PATH)));
         m
     }).await?;
     Ok(())
