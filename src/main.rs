@@ -87,7 +87,7 @@ impl EventHandler for Handler {
     }
 
     async fn typing_start(&self, ctx: Context, ev: TypingStartEvent) {
-        match ev.user_id.to_user(&ctx.http).await {
+        /*match ev.user_id.to_user(&ctx.http).await {
             Ok(u) => {
                 let _ = ev.channel_id.send_message(&ctx.http, |m| {
                     m.content(format_args!(
@@ -115,7 +115,7 @@ impl EventHandler for Handler {
                 }
             }
             Err(_) => {}
-        }
+        }*/
     }
 }
 
