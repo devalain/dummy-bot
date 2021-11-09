@@ -104,6 +104,7 @@ impl std::fmt::Display for SurveyError {
 #[async_trait]
 pub trait SurveyManager {
     async fn update_survey_add(&self, reaction: &Reaction) -> std::result::Result<(), SurveyError>;
+    async fn update_survey_rm(&self, reaction: &Reaction) -> std::result::Result<(), SurveyError>;
     async fn new_survey(&self, channel: ChannelId, survey: Survey) -> CommandResult;
 }
 
@@ -137,6 +138,32 @@ impl SurveyManager for Context {
             .await?;
         Ok(())
     }
+
+    async fn update_survey_rm(&self, reaction: &Reaction) -> std::prelude::rust_2015::Result<(), SurveyError> {
+        let key: (ChannelId, MessageId) = (reaction.channel_id, reaction.message_id);
+        let mut data = self.data.write().await;
+        let mut survey_map = data
+            .get_mut::<SurveyKey>()
+            .ok_or(SurveyError::NoData)?
+            .lock()
+            .await;
+        let survey = survey_map.get_mut(&key).ok_or(SurveyError::NoData)?;
+        let emoji = reaction
+            .emoji
+            .to_string()
+            .chars()
+            .next()
+            .ok_or(SurveyError::NoEmoji)?;
+
+        let answerers_entry = survey.answerers.get_mut(&emoji).unwrap();
+        *answerers_entry -= 1;
+
+        key.0
+            .edit_message(&self.http, key.1, |msg| msg.content(survey.to_string()))
+            .await?;
+        Ok(())
+    }
+
     async fn new_survey(&self, channel: ChannelId, survey: Survey) -> CommandResult {
         let message_text = survey.to_string();
         let survey_msg = channel.say(&self.http, &message_text).await?;

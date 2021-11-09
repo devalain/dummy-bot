@@ -56,19 +56,22 @@ struct Handler;
 impl EventHandler for Handler {
     async fn reaction_add(&self, ctx: Context, add_reaction: Reaction) {
         println!("Added reaction");
-        if add_reaction.user_id == Some(ctx.cache.current_user_id().await) {
-            println!("Survey_Reaction_added: Reaction added by self, ignoring");
-            return;
-        }
-
-        match ctx.update_survey_add(&add_reaction).await {
-            Ok(()) => println!("Sucess !"),
-            Err(e) => println!("Error: {:#?}", e),
+        if add_reaction.user_id != Some(ctx.cache.current_user_id().await) {
+            match ctx.update_survey_add(&add_reaction).await {
+                Ok(()) => println!("Sucess !"),
+                Err(e) => println!("Error: {:#?}", e),
+            }
         }
     }
 
-    async fn reaction_remove(&self, _ctx: Context, _removed_reaction: Reaction) {
+    async fn reaction_remove(&self, ctx: Context, removed_reaction: Reaction) {
         println!("Removed reaction");
+        if removed_reaction.user_id != Some(ctx.cache.current_user_id().await) {
+            match ctx.update_survey_rm(&removed_reaction).await {
+                Ok(()) => println!("Sucess !"),
+                Err(e) => println!("Error: {:#?}", e),
+            }
+        }
     }
 
     async fn reaction_remove_all(
