@@ -1,80 +1,52 @@
-mod qrcode;
+mod survey;
 
+use crate::survey::{Survey, SurveyKey, SurveyManager, SurveyMap};
 use dotenv::dotenv;
 use serenity::{
     async_trait,
-    client::{Client, Context, EventHandler},
-    model::{
-        channel::Message,
-        gateway::Ready,
-        event::TypingStartEvent,
-        misc::Mentionable
-    },
-    framework::standard::{
+    client::{Context, EventHandler},
+    framework::{
+        standard::{
+            macros::{command, group},
+            Args, CommandResult,
+        },
         StandardFramework,
-        CommandResult,
-        macros::{
-            command,
-            group
-        }
     },
-    http::AttachmentType,
+    model::{
+        channel::{Message, Reaction},
+        gateway::Ready,
+        id::{ChannelId, MessageId},
+    },
+    prelude::*,
+    Client,
 };
-
-use std::env;
-use std::path::Path;
+use std::{env, sync::Arc};
 
 #[group]
-#[commands(ping, hello, qr)]
+#[commands(ping, survey)]
 struct General;
 
 #[command]
 async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.reply(ctx, "Pong!").await?;
+    if let Some(name) = msg.channel_id.name(&ctx.cache).await.as_deref() {
+        msg.reply(ctx, format!("Pong in '{}' ({})", name, msg.channel_id))
+            .await?;
+    } else {
+        msg.reply(ctx, "Pong !").await?;
+    }
     Ok(())
 }
 
 #[command]
-async fn hello(ctx: &Context, msg: &Message) -> CommandResult {
-    let _msg = msg.channel_id.send_message(&ctx.http, |m| {
-        m.content("Hello");
-        m.embed(|e| {
-            e.title("This is a title");
-            e.description("This is a description");
-            //e.image("attachment://ferris_eyes.png");
-            e.fields(vec![
-                ("This is the first field", "This is a field body", true),
-                ("This is the second field", "Both of these fields are inline", true),
-            ]);
-            e.field("This is the third field", "This is not an inline field", false);
-            e.footer(|f| {
-                f.text("This is a footer");
-
-                f
-            });
-            e
-        });
-
-        //m.add_file(AttachmentType::Path(Path::new("./ferris_eyes.png")));
-        m
-    }).await?;
-    Ok(())
-}
-
-#[command]
-async fn qr(ctx: &Context, msg: &Message) -> CommandResult {
-    const QR_PATH: &str = "/tmp/alain/lastqr.png";
-    let img = qrcode::qr(&msg.content[4..]).unwrap();
-    img.save(QR_PATH).unwrap();
-
-    let _msg = msg.channel_id.send_message(&ctx.http, |m| {
-        m.embed(|e| {
-            e.image("attachment://lastqr.png");
-            e
-        });
-        m.add_file(AttachmentType::Path(Path::new(QR_PATH)));
-        m
-    }).await?;
+async fn survey(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let question = args.single_quoted::<String>()?; // Gets the first "argument"
+    let answers = args
+        .quoted() //Enables "quoting" for answers with space
+        .iter::<String>() //Iterates over the rest of the arguments
+        .filter_map(|x| x.ok()) //Filters out any argument that failed to parse
+        .collect::<Vec<_>>(); //Collects all the arguments into a Vec<String>
+    let survey = Survey::new(question, &answers);
+    ctx.new_survey(msg.channel_id, survey).await?;
     Ok(())
 }
 
@@ -82,40 +54,34 @@ struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+    async fn reaction_add(&self, ctx: Context, add_reaction: Reaction) {
+        println!("Added reaction");
+        if add_reaction.user_id == Some(ctx.cache.current_user_id().await) {
+            println!("Survey_Reaction_added: Reaction added by self, ignoring");
+            return;
+        }
+
+        match ctx.update_survey_add(&add_reaction).await {
+            Ok(()) => println!("Sucess !"),
+            Err(e) => println!("Error: {:#?}", e),
+        }
     }
 
-    async fn typing_start(&self, ctx: Context, ev: TypingStartEvent) {
-        /*match ev.user_id.to_user(&ctx.http).await {
-            Ok(u) => {
-                let _ = ev.channel_id.send_message(&ctx.http, |m| {
-                    m.content(format_args!(
-                        "{user} est entrain d'écrire... ça sera sûrement très intéressant 🙄",
-                        user = u.mention())
-                    );
-                    m
-                }).await;
+    async fn reaction_remove(&self, _ctx: Context, _removed_reaction: Reaction) {
+        println!("Removed reaction");
+    }
 
-                tokio::select! {
-                    Some(r) = u.await_reaction(&ctx.shard) => {
-                        eprintln!("{:?}", r);
-                        let _ = ev.channel_id.send_message(&ctx.http, |m|{
-                            m.content("Hahahaha !");
-                            m
-                        }).await;
-                    },
-                    Some(rep) = u.await_reply(&ctx.shard) => {
-                        eprintln!("{:?}", rep);
-                        let _ = ev.channel_id.send_message(&ctx.http, |m|{
-                            m.content("C'est cela oui !");
-                            m
-                        }).await;
-                    }
-                }
-            }
-            Err(_) => {}
-        }*/
+    async fn reaction_remove_all(
+        &self,
+        _ctx: Context,
+        _channel_id: ChannelId,
+        _removed_from_message_id: MessageId,
+    ) {
+        println!("All reactions removed");
+    }
+
+    async fn ready(&self, _: Context, ready: Ready) {
+        println!("{} is connected!", ready.user.name);
     }
 }
 
@@ -132,6 +98,7 @@ async fn main() {
     let mut client = Client::builder(token)
         .event_handler(Handler)
         .framework(framework)
+        .type_map_insert::<SurveyKey>(Arc::new(Mutex::new(SurveyMap::new())))
         .await
         .expect("Error creating client");
 
